@@ -1,0 +1,16 @@
+Subject: Scheduling request — Waterdown
+
+Hi team,
+
+Please schedule the purchase orders for project "Waterdown" using this CSV:
+CSV path: data/po_csv/sample.csv
+
+Start week: 2025-W40
+Capacity: 120 tonnes per week
+
+Rules:
+- Use the due_date in the CSV per item.
+- If the plan can’t meet a due date, set feasible = false and explain why in notes.
+
+Thanks,
+Myles

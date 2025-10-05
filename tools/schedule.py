@@ -1,93 +1,63 @@
-# tools/schedule.py
-# Simple weekly packer for PO CSVs (120 t/week default).
-# No AI here: just read CSV, pack into ISO weeks, add feasibility notes.
-
 from datetime import date, timedelta
-import csv
+from typing import List, Dict, Tuple
 
-CAPACITY_T_PER_WEEK = 120.0  # default shop capacity
+CAP = 120.0  # tonnes per week
 
-# ---------- ISO week helpers ----------
-def parse_week_str(week_str: str):
-    # "YYYY-Www" -> (year, week)
-    year, w = week_str.split("-W")
-    return int(year), int(w)
+def _parse_week(week_str: str) -> Tuple[int, int]:
+    # "YYYY-Www" -> (YYYY, ww)
+    try:
+        y = int(week_str[:4])
+        w = int(week_str[6:])
+        return y, w
+    except Exception:
+        raise ValueError(f"Bad ISO week format: {week_str!r}. Expected YYYY-Www (e.g., 2025-W40).")
 
-def week_to_monday(year: int, week: int) -> date:
-    return date.fromisocalendar(year, week, 1)  # Monday
+def _week_to_str(y: int, w: int) -> str:
+    return f"{y}-W{w:02d}"
 
-def monday_to_week_str(monday: date) -> str:
-    y, w, _ = monday.isocalendar()
-    return f"{y:04d}-W{w:02d}"
+def _next_week(week_str: str) -> str:
+    y, w = _parse_week(week_str)
+    # Monday of this ISO week, then add 7 days and re-read the ISO week
+    monday = date.fromisocalendar(y, w, 1)
+    nxt = monday + timedelta(days=7)
+    y2, w2, _ = nxt.isocalendar()
+    return _week_to_str(y2, w2)
 
-def advance_week(year: int, week: int):
-    mon = week_to_monday(year, week) + timedelta(days=7)
-    y, w, _ = mon.isocalendar()
-    return y, w
+def schedule_cap_120t_week(rows: List[Dict], start_week: str) -> List[Dict]:
+    """
+    Greedy packer: place items into ISO weeks so total per week <= 120 t.
+    Sorts by due_date first (earliest due first).
+    Returns a list of items with start_week/end_week filled.
+    """
+    # sort by due_date so nearer deadlines go earlier
+    rows_sorted = sorted(rows, key=lambda r: (r.get("due_date", ""), r.get("po_id", "")))
 
-def week_leq(y1: int, w1: int, y2: int, w2: int) -> bool:
-    return (y1, w1) <= (y2, w2)
+    week = start_week
+    used_this_week = 0.0
+    plan_items: List[Dict] = []
 
-# ---------- core ----------
-def read_po_csv(path: str):
-    """Return list of dicts: {po_id, weight_tonnes, due_date}"""
-    rows = []
-    with open(path, newline="", encoding="utf-8") as f:
-        for r in csv.DictReader(f):
-            rows.append({
-                "po_id": r["po_id"].strip(),
-                "weight_tonnes": float(r["weight_tonnes"]),
-                "due_date": r["due_date"].strip(),  # "YYYY-MM-DD"
-            })
-    return rows
+    for r in rows_sorted:
+        wt = float(r["weight_tonnes"])
 
-def schedule_rows(rows, start_week: str, capacity_t_per_week: float = CAPACITY_T_PER_WEEK):
-    """Greedy pack: don’t split items; if a PO pushes past capacity, move to next week."""
-    cur_year, cur_week = parse_week_str(start_week)
-    used = 0.0
-    items = []
-    notes = []
-    feasible = True
+        # if adding this item would exceed capacity and we already packed some this week,
+        # move to the next week before placing it.
+        if used_this_week > 0.0 and used_this_week + wt > CAP:
+            week = _next_week(week)
+            used_this_week = 0.0
 
-    for r in rows:
-        po = r["po_id"]
-        w = float(r["weight_tonnes"])
-
-        # if item itself > capacity, still place it (solo) and mark infeasible
-        if w > capacity_t_per_week:
-            notes.append(f"{po}: weight {w}t exceeds weekly capacity {capacity_t_per_week}t (cannot fit).")
-            feasible = False
-
-        # move to next week if adding this would exceed remaining capacity
-        if used > 0 and used + w > capacity_t_per_week:
-            cur_year, cur_week = advance_week(cur_year, cur_week)
-            used = 0.0
-
-        # place item in current week
-        start_w = end_w = f"{cur_year:04d}-W{cur_week:02d}"
-        used += w
-
-        # deadline check
-        y_due, w_due, _ = date.fromisoformat(r["due_date"]).isocalendar()
-        if not week_leq(cur_year, cur_week, y_due, w_due):
-            feasible = False
-            notes.append(f"{po}: scheduled in {end_w} but due week is {y_due:04d}-W{w_due:02d}.")
-
-        items.append({
-            "po_id": po,
-            "weight_tonnes": w,
+        plan_items.append({
+            "po_id": r["po_id"],
+            "weight_tonnes": wt,
             "due_date": r["due_date"],
-            "start_week": start_w,
-            "end_week": end_w
+            "start_week": week,
+            "end_week": week
         })
 
-        # if we exactly hit capacity, advance for the next item
-        if abs(used - capacity_t_per_week) < 1e-9:
-            cur_year, cur_week = advance_week(cur_year, cur_week)
-            used = 0.0
+        used_this_week += wt
 
-    return {
-        "items": items,
-        "feasible": feasible,
-        "notes": notes
-    }
+        # exactly full? advance to next week for the next item
+        if used_this_week >= CAP - 1e-9:
+            week = _next_week(week)
+            used_this_week = 0.0
+
+    return plan_items

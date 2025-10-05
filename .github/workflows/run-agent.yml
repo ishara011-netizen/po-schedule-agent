@@ -1,0 +1,21 @@
+name: Run PO Schedule Agent
+
+on:
+  workflow_dispatch: {}   # lets you run it manually from the Actions tab
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Run agent
+        run: |
+          python agent/run_local.py
+      - name: Upload schedule.json
+        uses: actions/upload-artifact@v4
+        with:
+          name: schedule-json
+          path: schedule.json

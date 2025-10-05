@@ -5,7 +5,7 @@ Hi team,
 Please schedule the purchase orders for project "Waterdown" using this CSV:
 CSV path: data/po_csv/sample.csv
 
-Start week: 2025-W40
+Start week: 2025-W42
 Capacity: 120 tonnes per week
 
 Rules:
